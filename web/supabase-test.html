@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SATRIA TAPUT - Uji Supabase</title>
+<style>
+body{font-family:Arial;background:#edf2f8;padding:20px}
+.box{max-width:430px;margin:40px auto;background:white;padding:24px;border-radius:14px;box-shadow:0 5px 25px #0001}
+input,button{width:100%;padding:13px;margin:8px 0;box-sizing:border-box}
+button{background:#173665;color:white;border:0;border-radius:7px;font-weight:bold}
+#result{white-space:pre-wrap;overflow-wrap:anywhere;margin-top:15px}
+</style>
+</head>
+<body>
+<div class="box">
+<h2>SATRIA TAPUT</h2>
+<p>Pengujian koneksi Supabase Auth</p>
+
+<form id="login">
+<input id="email" type="email" placeholder="Email Super Admin" required>
+<input id="password" type="password" placeholder="Password Supabase" required>
+<button id="submit">Uji Login</button>
+</form>
+
+<button id="logout" hidden>Logout</button>
+<div id="result">Belum terhubung.</div>
+</div>
+
+<script type="module">
+import { createClient } from
+'https://esm.sh/@supabase/supabase-js@2';
+
+const supabase = createClient(
+'https://cgtyqihpldwctpezazdt.supabase.co',
+' sb_publishable_kE9Mcl_0TgO0-utqn2HgEQ_HJtfLMV2'.trim()
+);
+
+const result = document.getElementById('result');
+const form = document.getElementById('login');
+const button = document.getElementById('submit');
+const logout = document.getElementById('logout');
+
+form.addEventListener('submit', async (event) => {
+ event.preventDefault();
+ button.disabled = true;
+ result.textContent = 'Menghubungkan...';
+
+ try {
+  const {data, error} = await supabase.auth.signInWithPassword({
+   email: document.getElementById('email').value.trim(),
+   password: document.getElementById('password').value
+  });
+
+  if (error) throw error;
+
+  const {data: profile, error: profileError} =
+   await supabase.from('profiles')
+    .select('id,full_name,role,account_status')
+    .eq('id', data.user.id)
+    .single();
+
+  if (profileError) throw profileError;
+
+  result.textContent =
+   'KONEKSI BERHASIL\n\n' +
+   'Nama: ' + profile.full_name + '\n' +
+   'Role: ' + profile.role + '\n' +
+   'Status: ' + profile.account_status;
+
+  logout.hidden = false;
+ } catch(error) {
+  result.textContent = 'GAGAL:\n' + error.message;
+ } finally {
+  button.disabled = false;
+ }
+});
+
+logout.addEventListener('click', async () => {
+ await supabase.auth.signOut();
+ result.textContent = 'Sudah logout.';
+ logout.hidden = true;
+});
+</script>
+</body>
+</html>
