@@ -5898,38 +5898,98 @@ function deleteReport(nomor){
  renderRoleDashboard(getCurrentUserRole() || "Dashboard Pengguna");
  renderArchive();
 }
+async function initializeApplication() {
+  try {
+    removeAuthTokensFromAddressBar();
 
-async function initializeApplication(){
- try {
-  removeAuthTokensFromAddressBar();
-  ensureDemoUsers();
-  await migrateLegacyDemoPasswords();
-  renderAuthState();
-  if (getCurrentUserRole() !== "Masyarakat") tampilkan();
-  if (resetTokenFromUrl) {
-   document.getElementById("publicPortal").classList.add("hidden");
-   document.getElementById("appView").classList.add("hidden");
-   document.getElementById("authView").classList.remove("hidden");
-   showAuthPanel("resetPanel");
-  } else if (verifyTokenFromUrl) {
-   try {
-    await requestAuthApi("/api/auth/email/verify", { method: "POST", body: JSON.stringify({ token: verifyTokenFromUrl }) });
-    showToast("Email berhasil diverifikasi. Silakan masuk.", "success");
-   } catch (error) {
-    showToast(error.message || "Verifikasi email tidak dapat diproses.", "error");
-   }
-   showInternalLogin();
+    if (!window.satriaSupabase) {
+      throw new Error("Koneksi Supabase belum tersedia.");
+    }
+
+    // Ambil sesi Supabase yang tersimpan
+    const { data, error } =
+      await window.satriaSupabase.auth.getSession();
+
+    if (error) throw error;
+
+    if (data.session && data.session.user) {
+      await loadSatriaProfile(data.session.user);
+    } else {
+      window.satriaCurrentUser = null;
+    }
+
+    renderAuthState();
+
+    if (
+      window.satriaCurrentUser &&
+      window.satriaCurrentUser.role !== "Masyarakat"
+    ) {
+      tampilkan();
+    }
+
+    // Pantau perubahan sesi Supabase
+    if (!window.satriaAuthListener) {
+      const { data: listener } =
+        window.satriaSupabase.auth.onAuthStateChange(
+          (event, session) => {
+            if (event === "TOKEN_REFRESHED") return;
+
+            setTimeout(async () => {
+              try {
+                if (session && session.user) {
+                  await loadSatriaProfile(session.user);
+                } else {
+                  window.satriaCurrentUser = null;
+                }
+
+                renderAuthState();
+
+                if (
+                  window.satriaCurrentUser &&
+                  window.satriaCurrentUser.role !== "Masyarakat"
+                ) {
+                  tampilkan();
+                }
+              } catch (error) {
+                window.satriaCurrentUser = null;
+                renderAuthState();
+                console.error(
+                  "Pembaruan sesi SATRIA TAPUT gagal:",
+                  error
+                );
+              }
+            }, 0);
+          }
+        );
+
+      window.satriaAuthListener = listener;
+    }
+
+    // Penanganan tautan reset password lama
+    if (resetTokenFromUrl) {
+      document.getElementById("publicPortal").classList.add("hidden");
+      document.getElementById("appView").classList.add("hidden");
+      document.getElementById("authView").classList.remove("hidden");
+      showAuthPanel("resetPanel");
+    }
+
+    updateLiveClock();
+    setInterval(updateLiveClock, 1000);
+
+  } catch (error) {
+    window.satriaCurrentUser = null;
+
+    document.getElementById("publicPortal").classList.remove("hidden");
+    document.getElementById("authView").classList.add("hidden");
+    document.getElementById("appView").classList.add("hidden");
+
+    console.error("Inisialisasi SATRIA TAPUT:", error);
+
+    alert(
+      error.message || "Inisialisasi aplikasi gagal."
+    );
   }
- } catch (error) {
-  document.getElementById("publicPortal").classList.remove("hidden");
-  document.getElementById("authView").classList.add("hidden");
-  document.getElementById("appView").classList.add("hidden");
-  alert(error.message || "Inisialisasi aplikasi gagal.");
- }
- updateLiveClock();
- setInterval(updateLiveClock, 1000);
 }
-
 document.getElementById("loginForm").addEventListener("submit", async function (event) {
   event.preventDefault();
 
