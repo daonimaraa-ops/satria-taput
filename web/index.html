@@ -5931,32 +5931,55 @@ async function initializeApplication(){
 }
 
 document.getElementById("loginForm").addEventListener("submit", async function (event) {
- event.preventDefault();
- if (!this.reportValidity()) return;
- const identifier = document.getElementById("username").value.trim().toLowerCase();
- const password = document.getElementById("password").value;
- const submitButton = document.getElementById("loginSubmit");
- setAuthStatus("loginStatus", "");
- setButtonBusy(submitButton, true, "Memeriksa...");
- try {
-  await migrateLegacyDemoPasswords();
-  const users = getDemoUsers();
-  const user = users.find((item) =>
-   String(item.username || "").toLowerCase() === identifier || String(item.email || "").toLowerCase() === identifier
-  );
-  if (!user || !user.passwordHash || !user.passwordSalt || !await verifyPassword(password, user)) {
-   setAuthStatus("loginStatus", "Email/username atau password tidak sesuai.", "error");
-   return;
+  event.preventDefault();
+
+  if (!this.reportValidity()) return;
+
+  const email = document.getElementById("username").value.trim().toLowerCase();
+  const password = document.getElementById("password").value;
+  const submitButton = document.getElementById("loginSubmit");
+
+  setAuthStatus("loginStatus", "");
+  setButtonBusy(submitButton, true, "Memeriksa...");
+
+  try {
+    if (!window.satriaSupabase) {
+      throw new Error("Koneksi Supabase belum tersedia.");
+    }
+
+    const { data, error } = await window.satriaSupabase.auth.signInWithPassword({
+      email: email,
+      password: password
+    });
+
+    if (error) throw error;
+
+    const user = await loadSatriaProfile(data.user);
+
+    if (!user) {
+      throw new Error("Profil pengguna tidak ditemukan.");
+    }
+
+    renderAuthState();
+
+    if (user.role !== "Masyarakat") {
+      tampilkan();
+    }
+
+    showToast("Login SATRIA TAPUT berhasil.", "success");
+
+  } catch (error) {
+    window.satriaCurrentUser = null;
+
+    setAuthStatus(
+      "loginStatus",
+      error.message || "Login gagal.",
+      "error"
+    );
+
+  } finally {
+    setButtonBusy(submitButton, false, "Masuk");
   }
-  setCurrentSession(user, document.getElementById("rememberMe").checked);
-  renderAuthState();
-  if (user.role !== "Masyarakat") tampilkan();
-  showToast(user.role === "Masyarakat" ? "Login akun Masyarakat demo lokal berhasil." : "Login demo lokal berhasil.", "success");
- } catch (error) {
-  setAuthStatus("loginStatus", error.message || "Login gagal karena penyimpanan atau Web Crypto tidak tersedia.", "error");
- } finally {
-  setButtonBusy(submitButton, false, "Masuk");
- }
 });
 
 document.getElementById("togglePassword").addEventListener("click", function () {
