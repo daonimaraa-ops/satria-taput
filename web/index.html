@@ -4952,18 +4952,37 @@ function markNotificationRead(id){
  renderNotifications();
 }
 
-function logoutUser(options = {}){
- if (options.confirm !== false && !confirm("Anda yakin ingin logout dari SATRIA TAPUT?")) return;
- closeAccountMenu();
- closeCommunityAccountMenu();
- sessionStorage.removeItem(SESSION_KEY);
- localStorage.removeItem(SESSION_KEY);
- document.getElementById("profileModal").classList.add("hidden");
- renderAuthState();
- const loginForm = document.getElementById("loginForm");
- if (loginForm) loginForm.reset();
- showAuthPanel("loginPanel");
- if (options.confirm !== false) showToast("Anda telah logout dari sesi demo lokal.", "success");
+async function logoutUser(options = {}) {
+  const shouldConfirm = options.confirm !== false;
+
+  if (shouldConfirm) {
+    const approved = confirm("Apakah Anda yakin ingin keluar?");
+    if (!approved) return;
+  }
+
+  try {
+    if (!window.satriaSupabase) {
+      throw new Error("Koneksi Supabase tidak tersedia.");
+    }
+
+    const { error } = await window.satriaSupabase.auth.signOut();
+
+    if (error) throw error;
+
+    window.satriaCurrentUser = null;
+
+    renderAuthState();
+
+    showToast("Anda berhasil keluar dari SATRIA TAPUT.", "success");
+
+  } catch (error) {
+    console.error("Logout gagal:", error);
+
+    showToast(
+      error.message || "Gagal keluar dari aplikasi.",
+      "error"
+    );
+  }
 }
 
 function showInternalLogin(event){
