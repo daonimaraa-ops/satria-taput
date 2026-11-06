@@ -1616,7 +1616,9 @@ function getAgencyScope(role = getCurrentUserRole()){
  }[role] || "";
 }
 
-function getCurrentUser(){
+function getCurrentUser() {
+  return window.satriaCurrentUser || null;
+}
  const session = getCurrentSession();
  if (!session?.username) return null;
  return getDemoUsers().find((user) => user.username === session.username) || null;
