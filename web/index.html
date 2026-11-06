@@ -6117,88 +6117,133 @@ document.getElementById("profileNewPassword").addEventListener("input", () => sy
 });
 
 document.getElementById("registerForm").addEventListener("submit", async function (event) {
- event.preventDefault();
- if (!this.reportValidity()) return;
- const name = document.getElementById("registerName").value.trim();
- const email = document.getElementById("registerEmail").value.trim().toLowerCase();
- const phone = document.getElementById("registerPhone").value.trim();
- const password = document.getElementById("registerPassword").value;
- const confirmPassword = document.getElementById("registerConfirmPassword").value;
- const phoneDigits = phone.replace(/\D/g, "");
- if (!name) {
-  setAuthStatus("registerStatus", "Nama lengkap wajib diisi.", "error");
-  document.getElementById("registerName").focus();
-  return;
- }
- if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-  setAuthStatus("registerStatus", "Masukkan alamat email dengan format yang valid.", "error");
-  document.getElementById("registerEmail").focus();
-  return;
- }
- if (phoneDigits.length < 8 || phoneDigits.length > 15) {
-  setAuthStatus("registerStatus", "Nomor HP harus memiliki 8 sampai 15 digit.", "error");
-  document.getElementById("registerPhone").focus();
-  return;
- }
- if (password.length < 12 || password.length > 128) {
-  setAuthStatus("registerStatus", "Password harus terdiri dari 12 sampai 128 karakter.", "error");
-  document.getElementById("registerPassword").focus();
-  return;
- }
- if (password !== confirmPassword) {
-  setAuthStatus("registerStatus", "Konfirmasi password tidak cocok.", "error");
-  document.getElementById("registerConfirmPassword").focus();
-  return;
- }
- if (!document.getElementById("acceptTerms").checked) {
-  setAuthStatus("registerStatus", "Setujui syarat penggunaan dan kebijakan privasi untuk melanjutkan.", "error");
-  document.getElementById("acceptTerms").focus();
-  return;
- }
- const button = document.getElementById("registerSubmit");
- setButtonBusy(button, true, "Membuat akun...");
- setAuthStatus("registerStatus", "");
- try {
-  const users = getDemoUsers();
-  if (users.some((user) =>
-   String(user.email || "").trim().toLowerCase() === email ||
-   String(user.username || "").trim().toLowerCase() === email
-  )) {
-   setAuthStatus("registerStatus", "Email ini sudah digunakan. Silakan masuk atau gunakan alamat email lain.", "error");
-   document.getElementById("registerEmail").focus();
-   return;
+  event.preventDefault();
+
+  if (!this.reportValidity()) return;
+
+  const name = document.getElementById("registerName").value.trim();
+  const email = document.getElementById("registerEmail").value.trim().toLowerCase();
+  const phone = document.getElementById("registerPhone").value.trim();
+  const password = document.getElementById("registerPassword").value;
+  const confirmPassword = document.getElementById("registerConfirmPassword").value;
+  const phoneDigits = phone.replace(/\D/g, "");
+  const button = document.getElementById("registerSubmit");
+
+  if (!name) {
+    setAuthStatus("registerStatus", "Nama lengkap wajib diisi.", "error");
+    document.getElementById("registerName").focus();
+    return;
   }
-  const passwordSalt = makePasswordSalt();
-  const passwordHash = await hashPassword(password, passwordSalt);
-  const userId = `masyarakat-${makePasswordSalt()}`;
-  users.push({
-   id: userId,
-   username: email,
-   email,
-   name,
-   phone,
-   role: "Masyarakat",
-   passwordSalt,
-   passwordHash,
-   passwordIterations: 210000,
-   emailVerified: false,
-   accountStatus: "Demo lokal · email belum diverifikasi",
-   acceptedTermsAt: new Date().toISOString(),
-   createdAt: new Date().toISOString()
-  });
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-  this.reset();
-  updatePasswordStrength("");
-  document.getElementById("username").value = email;
-  setAuthStatus("loginStatus", "Akun Masyarakat demo lokal berhasil dibuat. Silakan masuk. Email tidak diverifikasi pada mode ini.", "success");
-  showAuthPanel("loginPanel");
-  document.getElementById("username").focus();
-  showToast("Pendaftaran akun demo lokal berhasil. Email belum diverifikasi.", "success");
- } catch (error) {
-  setAuthStatus("registerStatus", error.message || "Pendaftaran akun lokal gagal. Periksa dukungan browser dan ruang penyimpanan.", "error");
- } finally {
-  setButtonBusy(button, false, "Daftar Akun");
- }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    setAuthStatus("registerStatus", "Masukkan alamat email yang valid.", "error");
+    document.getElementById("registerEmail").focus();
+    return;
+  }
+
+  if (phoneDigits.length < 8 || phoneDigits.length > 15) {
+    setAuthStatus("registerStatus", "Nomor HP harus memiliki 8 sampai 15 digit.", "error");
+    document.getElementById("registerPhone").focus();
+    return;
+  }
+
+  if (password.length < 12 || password.length > 128) {
+    setAuthStatus("registerStatus", "Password harus terdiri dari 12 sampai 128 karakter.", "error");
+    document.getElementById("registerPassword").focus();
+    return;
+  }
+
+  if (password !== confirmPassword) {
+    setAuthStatus("registerStatus", "Konfirmasi password tidak cocok.", "error");
+    document.getElementById("registerConfirmPassword").focus();
+    return;
+  }
+
+  if (!document.getElementById("acceptTerms").checked) {
+    setAuthStatus("registerStatus", "Setujui syarat penggunaan dan kebijakan privasi untuk melanjutkan.", "error");
+    document.getElementById("acceptTerms").focus();
+    return;
+  }
+
+  setButtonBusy(button, true, "Membuat akun...");
+  setAuthStatus("registerStatus", "");
+
+  try {
+    if (!window.satriaSupabase) {
+      throw new Error("Koneksi Supabase belum tersedia.");
+    }
+
+    const { data, error } = await window.satriaSupabase.auth.signUp({
+      email: email,
+      password: password,
+      options: {
+        data: {
+          full_name: name,
+          phone: phone,
+          accepted_terms_at: new Date().toISOString()
+        },
+        emailRedirectTo: window.location.origin + window.location.pathname
+      }
+    });
+
+    if (error) throw error;
+
+    if (data.session && data.user) {
+      try {
+        const user = await loadSatriaProfile(data.user);
+
+        if (!user) {
+          throw new Error("Profil akun tidak ditemukan.");
+        }
+
+        renderAuthState();
+
+        if (user.role !== "Masyarakat") {
+          tampilkan();
+        }
+
+        this.reset();
+        updatePasswordStrength("");
+        showToast("Pendaftaran akun Masyarakat berhasil.", "success");
+
+      } catch (profileError) {
+        await window.satriaSupabase.auth.signOut();
+        window.satriaCurrentUser = null;
+        renderAuthState();
+        throw profileError;
+      }
+
+    } else {
+      this.reset();
+      updatePasswordStrength("");
+      document.getElementById("username").value = email;
+
+      setAuthStatus(
+        "loginStatus",
+        "Pendaftaran berhasil. Silakan periksa email untuk melakukan verifikasi akun sebelum masuk.",
+        "success"
+      );
+
+      showAuthPanel("loginPanel");
+      document.getElementById("username").focus();
+    }
+
+  } catch (error) {
+    console.error("Registrasi SATRIA TAPUT:", error);
+
+    const message = error.message || "Pendaftaran akun gagal.";
+
+    setAuthStatus(
+      "registerStatus",
+      message.toLowerCase().includes("already registered")
+        ? "Email ini sudah terdaftar. Silakan masuk."
+        : message,
+      "error"
+    );
+
+  } finally {
+    setButtonBusy(button, false, "Daftar Akun");
+  }
 });
 
 document.getElementById("forgotForm").addEventListener("submit", async function (event) {
