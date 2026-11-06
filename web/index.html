@@ -788,7 +788,7 @@ footer{background:var(--navy-900);color:white;text-align:center;padding:25px;fon
           <div class="auth-check"><input id="acceptTerms" type="checkbox" required><label for="acceptTerms">Saya menyetujui syarat penggunaan dan kebijakan privasi.</label></div>
           <details><summary>Baca ringkasan syarat dan privasi</summary><p>Data akun digunakan untuk pelayanan dan komunikasi terkait laporan. Jangan mengirim informasi palsu atau darurat yang tidak benar. Akun demo lokal tidak memverifikasi alamat email; ketentuan dan pemberitahuan privasi resmi perlu disediakan oleh pengelola sebelum layanan produksi dibuka.</p></details>
         </div>
-        <p class="auth-info" style="margin:12px 0">Registrasi ini membuat akun demo lokal. Password di-hash pada browser, tetapi akun dan data dapat dimanipulasi; jangan gunakan untuk layanan operasional.</p>
+        <p class="auth-info" style="margin:12px 0">Pendaftaran menggunakan Supabase Auth. Gunakan email aktif untuk menerima tautan verifikasi akun jika verifikasi email diaktifkan.</p>
         <button type="submit" class="login-btn auth-btn" id="registerSubmit"><span class="auth-spinner" aria-hidden="true"></span><span class="button-label">Daftar Akun</span></button>
         <p id="registerStatus" class="auth-status" role="status" aria-live="polite"></p>
       </form>
@@ -807,7 +807,7 @@ footer{background:var(--navy-900);color:white;text-align:center;padding:25px;fon
 
     <section id="resetPanel" class="auth-panel" aria-labelledby="resetTitle" hidden>
       <h1 id="resetTitle">Buat Password Baru</h1>
-      <p class="subtitle">Tautan reset hanya dapat digunakan sekali dan kedaluwarsa sesuai kebijakan server.</p>
+      <p class="subtitle">Gunakan tautan pemulihan dari email untuk membuat password baru. Tautan memiliki masa berlaku terbatas.</p>
       <form id="resetForm" novalidate>
         <div class="form-row auth-field"><label for="resetPassword">Password baru</label><div class="password-wrap"><input id="resetPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required><button type="button" class="toggle-password" data-password-toggle="resetPassword" aria-label="Tampilkan password">Tampil</button></div></div>
         <div class="form-row auth-field"><label for="resetConfirmPassword">Konfirmasi password baru</label><div class="password-wrap"><input id="resetConfirmPassword" type="password" autocomplete="new-password" minlength="12" maxlength="128" required><button type="button" class="toggle-password" data-password-toggle="resetConfirmPassword" aria-label="Tampilkan password">Tampil</button></div></div>
@@ -1497,11 +1497,8 @@ footer{background:var(--navy-900);color:white;text-align:center;padding:25px;fon
 const kunci = "satriaTaputLaporanV2";
 const USERS_KEY = "satriaTaputDemoUsers";
 const SESSION_KEY = "satriaTaputSession";
-const resetTokenFromUrl = new URLSearchParams(window.location.search).get("token") || "";
-const verifyTokenFromUrl = new URLSearchParams(window.location.search).get("verify") || "";
 let toastTimeout = null;
 let profilePendingAvatar = "";
-let authResetToken = resetTokenFromUrl;
 const PERSONNEL_KEY = "satriaTaputPersonelV1";
 const TEAMS_KEY = "satriaTaputReguV1";
 const SHIFTS_KEY = "satriaTaputPiketV1";
@@ -1618,10 +1615,6 @@ function getAgencyScope(role = getCurrentUserRole()){
 
 function getCurrentUser() {
   return window.satriaCurrentUser || null;
-}
- const session = getCurrentSession();
- if (!session?.username) return null;
- return getDemoUsers().find((user) => user.username === session.username) || null;
 }
 
 function canManageOperations(){
@@ -5062,9 +5055,10 @@ function setButtonBusy(button, busy, label){
  if (buttonLabel && label) buttonLabel.textContent = label;
 }
 
-function removeAuthTokensFromAddressBar(){
- if (!resetTokenFromUrl && !verifyTokenFromUrl) return;
+function removeLegacyAuthTokensFromAddressBar(){
  const url = new URL(window.location.href);
+ const hadLegacyTokens = url.searchParams.has("token") || url.searchParams.has("verify");
+ if (!hadLegacyTokens) return;
  url.searchParams.delete("token");
  url.searchParams.delete("verify");
  window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
@@ -5919,16 +5913,58 @@ function deleteReport(nomor){
 }
 async function initializeApplication() {
   try {
-    removeAuthTokensFromAddressBar();
+    removeLegacyAuthTokensFromAddressBar();
 
     if (!window.satriaSupabase) {
       throw new Error("Koneksi Supabase belum tersedia.");
     }
 
-    // Ambil sesi Supabase yang tersimpan
-    const { data, error } =
-      await window.satriaSupabase.auth.getSession();
+    // Pasang listener lebih dahulu agar peristiwa PASSWORD_RECOVERY tidak terlewat.
+    if (!window.satriaAuthListener) {
+      const { data: listener } = window.satriaSupabase.auth.onAuthStateChange(
+        (event, session) => {
+          if (event === "PASSWORD_RECOVERY") {
+            window.satriaCurrentUser = null;
+            document.getElementById("publicPortal").classList.add("hidden");
+            document.getElementById("appView").classList.add("hidden");
+            document.getElementById("authView").classList.remove("hidden");
+            showAuthPanel("resetPanel");
+            setAuthStatus("resetStatus", "Tautan pemulihan terverifikasi. Silakan buat password baru.", "success");
+            return;
+          }
 
+          if (event === "TOKEN_REFRESHED" || event === "INITIAL_SESSION") return;
+          if (event === "SIGNED_OUT" && window.satriaPasswordResetCompleted) {
+            window.satriaPasswordResetCompleted = false;
+            return;
+          }
+
+          setTimeout(async () => {
+            try {
+              if (session && session.user) {
+                await loadSatriaProfile(session.user);
+              } else {
+                window.satriaCurrentUser = null;
+              }
+
+              renderAuthState();
+
+              if (window.satriaCurrentUser && window.satriaCurrentUser.role !== "Masyarakat") {
+                tampilkan();
+              }
+            } catch (error) {
+              window.satriaCurrentUser = null;
+              renderAuthState();
+              console.error("Pembaruan sesi SATRIA TAPUT gagal:", error);
+            }
+          }, 0);
+        }
+      );
+
+      window.satriaAuthListener = listener;
+    }
+
+    const { data, error } = await window.satriaSupabase.auth.getSession();
     if (error) throw error;
 
     if (data.session && data.session.user) {
@@ -5939,57 +5975,20 @@ async function initializeApplication() {
 
     renderAuthState();
 
-    if (
-      window.satriaCurrentUser &&
-      window.satriaCurrentUser.role !== "Masyarakat"
-    ) {
+    if (window.satriaCurrentUser && window.satriaCurrentUser.role !== "Masyarakat") {
       tampilkan();
     }
 
-    // Pantau perubahan sesi Supabase
-    if (!window.satriaAuthListener) {
-      const { data: listener } =
-        window.satriaSupabase.auth.onAuthStateChange(
-          (event, session) => {
-            if (event === "TOKEN_REFRESHED") return;
+    // Supabase mengirim callback recovery dengan hash type=recovery.
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+    const hasRecoveryCallback = hashParams.get("type") === "recovery";
 
-            setTimeout(async () => {
-              try {
-                if (session && session.user) {
-                  await loadSatriaProfile(session.user);
-                } else {
-                  window.satriaCurrentUser = null;
-                }
-
-                renderAuthState();
-
-                if (
-                  window.satriaCurrentUser &&
-                  window.satriaCurrentUser.role !== "Masyarakat"
-                ) {
-                  tampilkan();
-                }
-              } catch (error) {
-                window.satriaCurrentUser = null;
-                renderAuthState();
-                console.error(
-                  "Pembaruan sesi SATRIA TAPUT gagal:",
-                  error
-                );
-              }
-            }, 0);
-          }
-        );
-
-      window.satriaAuthListener = listener;
-    }
-
-    // Penanganan tautan reset password lama
-    if (resetTokenFromUrl) {
+    if (hasRecoveryCallback) {
       document.getElementById("publicPortal").classList.add("hidden");
       document.getElementById("appView").classList.add("hidden");
       document.getElementById("authView").classList.remove("hidden");
       showAuthPanel("resetPanel");
+      setAuthStatus("resetStatus", "Tautan pemulihan terdeteksi. Silakan buat password baru.", "success");
     }
 
     updateLiveClock();
@@ -5997,18 +5996,14 @@ async function initializeApplication() {
 
   } catch (error) {
     window.satriaCurrentUser = null;
-
     document.getElementById("publicPortal").classList.remove("hidden");
     document.getElementById("authView").classList.add("hidden");
     document.getElementById("appView").classList.add("hidden");
-
     console.error("Inisialisasi SATRIA TAPUT:", error);
-
-    alert(
-      error.message || "Inisialisasi aplikasi gagal."
-    );
+    alert(error.message || "Inisialisasi aplikasi gagal.");
   }
 }
+
 document.getElementById("loginForm").addEventListener("submit", async function (event) {
   event.preventDefault();
 
@@ -6247,54 +6242,105 @@ document.getElementById("registerForm").addEventListener("submit", async functio
 });
 
 document.getElementById("forgotForm").addEventListener("submit", async function (event) {
- event.preventDefault();
- if (!this.reportValidity()) return;
- const button = document.getElementById("forgotSubmit");
- setButtonBusy(button, true, "Mengirim...");
- setAuthStatus("forgotStatus", "");
- try {
-  await requestAuthApi("/api/auth/password/forgot", {
-   method: "POST",
-   body: JSON.stringify({ email: document.getElementById("forgotEmail").value.trim() })
-  });
-  setAuthStatus("forgotStatus", "Jika alamat email valid, instruksi reset akan dikirim. Alamat email tidak diungkap dalam respons.", "success");
-  this.reset();
- } catch (error) {
-  setAuthStatus("forgotStatus", `${error.message} Status keberadaan email tidak diungkap.`, "error");
- } finally {
-  setButtonBusy(button, false, "Kirim Tautan Reset");
- }
+  event.preventDefault();
+  if (!this.reportValidity()) return;
+
+  const button = document.getElementById("forgotSubmit");
+  const email = document.getElementById("forgotEmail").value.trim().toLowerCase();
+
+  setButtonBusy(button, true, "Mengirim...");
+  setAuthStatus("forgotStatus", "");
+
+  try {
+    if (!window.satriaSupabase) {
+      throw new Error("Koneksi Supabase belum tersedia.");
+    }
+
+    const redirectTo = window.location.origin + window.location.pathname;
+    const { error } = await window.satriaSupabase.auth.resetPasswordForEmail(email, {
+      redirectTo: redirectTo
+    });
+
+    if (error) throw error;
+
+    setAuthStatus(
+      "forgotStatus",
+      "Jika email terdaftar, tautan untuk membuat password baru akan dikirim. Periksa kotak masuk dan folder spam.",
+      "success"
+    );
+    this.reset();
+
+  } catch (error) {
+    console.error("Permintaan reset password SATRIA TAPUT:", error);
+    setAuthStatus(
+      "forgotStatus",
+      error.message || "Permintaan reset password gagal. Silakan coba kembali.",
+      "error"
+    );
+  } finally {
+    setButtonBusy(button, false, "Kirim Tautan Reset");
+  }
 });
 
 document.getElementById("resetForm").addEventListener("submit", async function (event) {
- event.preventDefault();
- if (!this.reportValidity()) return;
- if (!authResetToken) {
-  setAuthStatus("resetStatus", "Token reset tidak tersedia atau sudah kedaluwarsa. Minta tautan baru.", "error");
-  return;
- }
- const button = document.getElementById("resetSubmit");
- setButtonBusy(button, true, "Memperbarui...");
- setAuthStatus("resetStatus", "");
- try {
-  await requestAuthApi("/api/auth/password/reset", {
-   method: "POST",
-   body: JSON.stringify({
-    token: authResetToken,
-    password: document.getElementById("resetPassword").value
-   })
-  });
-  authResetToken = "";
-  this.reset();
-  setAuthStatus("loginStatus", "Password berhasil diperbarui. Silakan masuk.", "success");
-  document.getElementById("authView").classList.remove("hidden");
-  showAuthPanel("loginPanel");
-  document.getElementById("username").focus();
- } catch (error) {
-  setAuthStatus("resetStatus", error.message || "Tautan reset tidak valid atau telah kedaluwarsa.", "error");
- } finally {
-  setButtonBusy(button, false, "Perbarui Password");
- }
+  event.preventDefault();
+  if (!this.reportValidity()) return;
+
+  const password = document.getElementById("resetPassword").value;
+  const confirmation = document.getElementById("resetConfirmPassword").value;
+  const button = document.getElementById("resetSubmit");
+
+  if (password.length < 12 || password.length > 128) {
+    setAuthStatus("resetStatus", "Password harus terdiri dari 12 sampai 128 karakter.", "error");
+    document.getElementById("resetPassword").focus();
+    return;
+  }
+
+  if (password !== confirmation) {
+    setAuthStatus("resetStatus", "Konfirmasi password tidak cocok.", "error");
+    document.getElementById("resetConfirmPassword").focus();
+    return;
+  }
+
+  setButtonBusy(button, true, "Memperbarui...");
+  setAuthStatus("resetStatus", "");
+
+  try {
+    if (!window.satriaSupabase) {
+      throw new Error("Koneksi Supabase belum tersedia.");
+    }
+
+    const { data: sessionData, error: sessionError } = await window.satriaSupabase.auth.getSession();
+    if (sessionError) throw sessionError;
+
+    if (!sessionData.session) {
+      throw new Error("Sesi pemulihan tidak ditemukan atau tautan sudah kedaluwarsa. Minta tautan reset baru.");
+    }
+
+    const { error } = await window.satriaSupabase.auth.updateUser({ password: password });
+    if (error) throw error;
+
+    window.satriaPasswordResetCompleted = true;
+    await window.satriaSupabase.auth.signOut();
+    window.satriaCurrentUser = null;
+
+    this.reset();
+    renderAuthState();
+    document.getElementById("authView").classList.remove("hidden");
+    showAuthPanel("loginPanel");
+    setAuthStatus("loginStatus", "Password berhasil diperbarui. Silakan masuk menggunakan password baru.", "success");
+    document.getElementById("username").focus();
+
+  } catch (error) {
+    console.error("Reset password SATRIA TAPUT:", error);
+    setAuthStatus(
+      "resetStatus",
+      error.message || "Password gagal diperbarui. Tautan mungkin tidak valid atau telah kedaluwarsa.",
+      "error"
+    );
+  } finally {
+    setButtonBusy(button, false, "Perbarui Password");
+  }
 });
 
 document.getElementById("editProfileBtn").addEventListener("click", () => {
