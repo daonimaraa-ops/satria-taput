@@ -6,7 +6,7 @@
     "https://cgtyqihpldwctpezazdt.supabase.co";
 
   const SUPABASE_PUBLISHABLE_KEY =
-    "sb_publishable_kE9Mcl_0TgO0-utqn2Hg_HJtfLMV2";
+    "sb_publishable_kE9Mcl_0TgO0-utqn2HgEQ_HJtfLMV2";
 
   if (!window.supabase || !window.supabase.createClient) {
     console.error("Supabase SDK belum dimuat.");
