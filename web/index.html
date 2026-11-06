@@ -1613,6 +1613,63 @@ function getAgencyScope(role = getCurrentUserRole()){
  }[role] || "";
 }
 
+/* SATRIA TAPUT — LOAD PROFILE DARI SUPABASE */
+window.satriaCurrentUser = window.satriaCurrentUser || null;
+
+const SATRIA_ROLE_MAP = {
+  super_admin: "Super Admin",
+  admin_satpol_pp: "Admin Satpol PP",
+  admin_damkar: "Admin Damkar",
+  admin_linmas: "Admin Linmas",
+  pimpinan: "Pimpinan",
+  operator: "Operator",
+  petugas: "Petugas",
+  masyarakat: "Masyarakat"
+};
+
+async function loadSatriaProfile(authUser) {
+  if (!authUser) {
+    window.satriaCurrentUser = null;
+    return null;
+  }
+
+  if (!window.satriaSupabase) {
+    throw new Error("Koneksi Supabase belum tersedia.");
+  }
+
+  const { data: profile, error } = await window.satriaSupabase
+    .from("profiles")
+    .select("id,full_name,role,account_status")
+    .eq("id", authUser.id)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!profile) {
+    throw new Error("Profil pengguna tidak ditemukan.");
+  }
+
+  if (profile.account_status !== "active") {
+    throw new Error("Akun belum aktif atau telah dinonaktifkan.");
+  }
+
+  const roleLabel = SATRIA_ROLE_MAP[profile.role];
+  if (!roleLabel) {
+    throw new Error("Hak akses akun tidak dikenali.");
+  }
+
+  window.satriaCurrentUser = {
+    id: profile.id,
+    username: authUser.email || authUser.id,
+    email: authUser.email || "",
+    name: profile.full_name || authUser.email || "Pengguna",
+    role: roleLabel,
+    account_status: profile.account_status,
+    avatarDataUrl: null
+  };
+
+  return window.satriaCurrentUser;
+}
+
 function getCurrentUser() {
   return window.satriaCurrentUser || null;
 }
